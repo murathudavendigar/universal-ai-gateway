@@ -11,14 +11,16 @@ server.addTool({
   description: "Health check",
   parameters: z.object({}),
   execute: async () => {
-    return {
+    // Çıktıyı JSON.stringify ile string'e çevirmek iletişimin kopmasını engeller
+    return JSON.stringify({
       status: "ok",
       gateway: "Universal AI Gateway",
       version: "0.1.0",
-    };
+    });
   },
 });
 
-server.start({
+// Başlatma işleminin tamamlanmasını beklemek (await) sürecin erken kapanmasını önler
+await server.start({
   transportType: "stdio",
 });
