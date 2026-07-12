@@ -1,0 +1,16 @@
+{
+  "name": "@uag/mcp",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx src/index.ts",
+    "build": "tsup src/index.ts --format esm --dts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "fastmcp": "^latest",
+    "@modelcontextprotocol/sdk": "^latest",
+    "zod": "^latest",
+    "dotenv": "^latest"
+  }
+}
