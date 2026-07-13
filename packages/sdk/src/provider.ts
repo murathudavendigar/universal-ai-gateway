@@ -1,0 +1,38 @@
+export type ChatRole = "system" | "user" | "assistant";
+
+export interface ChatMessage {
+  role: ChatRole;
+  content: string;
+}
+
+export interface ChatRequest {
+  model: string;
+  messages: ChatMessage[];
+
+  temperature?: number;
+  maxTokens?: number;
+
+  stream?: boolean;
+}
+
+export interface ChatResponse {
+  provider: string;
+  model: string;
+  content: string;
+
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+}
+
+export interface AIProvider {
+  readonly name: string;
+
+  chat(request: ChatRequest): Promise<ChatResponse>;
+
+  listModels(): Promise<string[]>;
+
+  health(): Promise<boolean>;
+}

@@ -1,6 +1,10 @@
 {
   "name": "universal-ai-gateway",
   "private": true,
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "build": "turbo run build",
     "dev": "turbo run dev",
@@ -12,6 +16,8 @@
   },
   "devDependencies": {
     "@types/node": "^22.15.3",
+    "@uag/core": "workspace:*",
+    "@uag/provider-openrouter": "workspace:*",
     "eslint": "^9.39.1",
     "prettier": "^3.7.4",
     "tsup": "^8.5.1",

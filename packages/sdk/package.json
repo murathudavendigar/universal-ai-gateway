@@ -1,0 +1,31 @@
+{
+  "name": "@uag/sdk",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./provider": {
+      "types": "./dist/provider.d.ts",
+      "import": "./dist/provider.js",
+      "default": "./dist/provider.js"
+    }
+  },
+  "scripts": {
+    "build": "tsup src/index.ts src/provider.ts --format esm,cjs --dts",
+    "dev": "tsup src/index.ts src/provider.ts --watch",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@repo/typescript-config": "workspace:*",
+    "@types/node": "^22.15.3",
+    "tsup": "^8.5.1",
+    "typescript": "5.9.2"
+  }
+}

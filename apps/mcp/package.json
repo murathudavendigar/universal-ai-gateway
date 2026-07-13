@@ -8,9 +8,9 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "fastmcp": "^latest",
-    "@modelcontextprotocol/sdk": "^latest",
-    "zod": "^latest",
-    "dotenv": "^latest"
+    "fastmcp": "^4.4.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "zod": "^4.4.3",
+    "dotenv": "^17.4.2"
   }
 }

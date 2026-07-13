@@ -1,0 +1,19 @@
+{
+  "extends": "../packages/typescript-config/base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "ignoreDeprecations": "6.0",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "paths": {
+      "@uag/provider-openrouter": [
+        "../packages/provider-openrouter/src/index.ts"
+      ],
+      "@uag/core": ["../packages/core/src/index.ts"],
+      "@uag/sdk/provider": ["../packages/sdk/src/provider.ts"]
+    },
+    "types": ["node"]
+  },
+  "include": ["./**/*.ts"],
+  "exclude": ["node_modules"]
+}
