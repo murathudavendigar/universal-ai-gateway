@@ -9,7 +9,7 @@ export interface RouteRequest {
   task: TaskType;
 }
 
-export interface RouteResult {
-  provider: string;
+export interface RoutePlan {
+  providerId: string;
   model: string;
 }

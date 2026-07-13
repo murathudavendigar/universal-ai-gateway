@@ -1,8 +1,13 @@
-import type { AIProvider, ChatRequest, ChatResponse } from "@uag/sdk/provider";
+import type {
+  AIProvider,
+  ChatChunk,
+  ChatRequest,
+  ChatResponse,
+} from "@uag/sdk/provider";
 
 import { OpenRouterClient } from "./client.js";
 import { MODELS } from "./models.js";
-import type { OpenRouterResponse } from "./types.js";
+import type { OpenRouterResponse, OpenRouterStreamChunk } from "./types.js";
 
 export class OpenRouterProvider implements AIProvider {
   readonly name = "openrouter";
@@ -28,6 +33,46 @@ export class OpenRouterProvider implements AIProvider {
         totalTokens: response.usage?.total_tokens,
       },
     };
+  }
+
+  async *streamChat(
+    request: ChatRequest
+  ): AsyncGenerator<ChatChunk, void, unknown> {
+    const stream = this.client.chatStream({
+      model: request.model,
+      messages: request.messages,
+      temperature: request.temperature,
+      max_tokens: request.maxTokens,
+    });
+
+    for await (const raw of stream) {
+      let parsed: OpenRouterStreamChunk;
+
+      try {
+        parsed = JSON.parse(raw) as OpenRouterStreamChunk;
+      } catch {
+        continue;
+      }
+
+      const choice = parsed.choices?.[0];
+      const finished = choice?.finish_reason != null;
+
+      yield {
+        provider: this.name,
+        model: parsed.model ?? request.model,
+        content: choice?.delta?.content ?? "",
+        done: finished,
+        ...(finished && parsed.usage
+          ? {
+              usage: {
+                promptTokens: parsed.usage.prompt_tokens,
+                completionTokens: parsed.usage.completion_tokens,
+                totalTokens: parsed.usage.total_tokens,
+              },
+            }
+          : {}),
+      };
+    }
   }
 
   async listModels(): Promise<string[]> {

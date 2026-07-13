@@ -27,10 +27,26 @@ export interface ChatResponse {
   };
 }
 
+export interface ChatChunk {
+  provider: string;
+  model: string;
+  content: string;
+
+  done?: boolean;
+
+  usage?: {
+    promptTokens?: number;
+    completionTokens?: number;
+    totalTokens?: number;
+  };
+}
+
 export interface AIProvider {
   readonly name: string;
 
   chat(request: ChatRequest): Promise<ChatResponse>;
+
+  streamChat(request: ChatRequest): AsyncGenerator<ChatChunk, void, unknown>;
 
   listModels(): Promise<string[]>;
 

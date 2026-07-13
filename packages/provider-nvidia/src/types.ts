@@ -17,3 +17,19 @@ export interface NvidiaResponse {
 
   model: string;
 }
+
+export interface NvidiaStreamChoice {
+  delta: {
+    content?: string;
+  };
+
+  finish_reason?: string | null;
+}
+
+export interface NvidiaStreamChunk {
+  choices: NvidiaStreamChoice[];
+
+  usage?: NvidiaUsage;
+
+  model: string;
+}

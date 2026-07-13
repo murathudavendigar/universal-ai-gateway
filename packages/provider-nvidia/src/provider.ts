@@ -1,8 +1,13 @@
-import type { AIProvider, ChatRequest, ChatResponse } from "@uag/sdk/provider";
+import type {
+  AIProvider,
+  ChatChunk,
+  ChatRequest,
+  ChatResponse,
+} from "@uag/sdk/provider";
 
 import { NvidiaClient } from "./client.js";
 import { MODELS } from "./models.js";
-import type { NvidiaResponse } from "./types.js";
+import type { NvidiaResponse, NvidiaStreamChunk } from "./types.js";
 
 export class NvidiaProvider implements AIProvider {
   readonly name = "nvidia";
@@ -28,6 +33,46 @@ export class NvidiaProvider implements AIProvider {
         totalTokens: response.usage?.total_tokens,
       },
     };
+  }
+
+  async *streamChat(
+    request: ChatRequest
+  ): AsyncGenerator<ChatChunk, void, unknown> {
+    const stream = this.client.chatStream({
+      model: request.model,
+      messages: request.messages,
+      temperature: request.temperature,
+      max_tokens: request.maxTokens,
+    });
+
+    for await (const raw of stream) {
+      let parsed: NvidiaStreamChunk;
+
+      try {
+        parsed = JSON.parse(raw) as NvidiaStreamChunk;
+      } catch {
+        continue;
+      }
+
+      const choice = parsed.choices?.[0];
+      const finished = choice?.finish_reason != null;
+
+      yield {
+        provider: this.name,
+        model: parsed.model ?? request.model,
+        content: choice?.delta?.content ?? "",
+        done: finished,
+        ...(finished && parsed.usage
+          ? {
+              usage: {
+                promptTokens: parsed.usage.prompt_tokens,
+                completionTokens: parsed.usage.completion_tokens,
+                totalTokens: parsed.usage.total_tokens,
+              },
+            }
+          : {}),
+      };
+    }
   }
 
   async listModels(): Promise<string[]> {

@@ -17,3 +17,19 @@ export interface OpenRouterResponse {
 
   model: string;
 }
+
+export interface OpenRouterStreamChoice {
+  delta: {
+    content?: string;
+  };
+
+  finish_reason?: string | null;
+}
+
+export interface OpenRouterStreamChunk {
+  choices: OpenRouterStreamChoice[];
+
+  usage?: OpenRouterUsage;
+
+  model: string;
+}
