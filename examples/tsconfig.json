@@ -9,6 +9,7 @@
       "@uag/provider-openrouter": [
         "../packages/provider-openrouter/src/index.ts"
       ],
+      "@uag/provider-nvidia": ["../packages/provider-nvidia/src/index.ts"],
       "@uag/core": ["../packages/core/src/index.ts"],
       "@uag/sdk/provider": ["../packages/sdk/src/provider.ts"]
     },
