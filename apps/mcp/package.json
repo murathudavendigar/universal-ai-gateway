@@ -1,10 +1,17 @@
 {
   "name": "@uag/mcp",
-  "private": true,
+  "version": "0.1.0",
+  "private": false,
   "type": "module",
+  "bin": {
+    "universal-ai-gateway": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "dev": "tsx src/index.ts",
-    "build": "tsup src/index.ts --format esm --dts",
+    "build": "tsup src/index.ts --format esm --dts --shims --clean && chmod +x dist/index.js",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

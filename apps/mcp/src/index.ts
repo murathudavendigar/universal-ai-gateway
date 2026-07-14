@@ -1,6 +1,6 @@
+#!/usr/bin/env node
 import { config } from "dotenv";
 import { FastMCP } from "fastmcp";
-import { resolve } from "node:path";
 import { env } from "node:process";
 import { z } from "zod";
 
@@ -8,8 +8,24 @@ import { AIGateway, ProviderRegistry, Router } from "@uag/core";
 import { createNvidiaProvider } from "@uag/provider-nvidia";
 import { createOpenRouterProvider } from "@uag/provider-openrouter";
 
-// Load environment variables from the repository root.
-config({ path: resolve(process.cwd(), "../../.env") });
+process.env.DOTENV_QUIET = "true";
+process.env.DOTENVX_QUIET = "true";
+
+// Fall back to a .env file in the user's current directory if the
+// required keys are not already present in the environment.
+if (!env.OPENROUTER_API_KEY || !env.NVIDIA_API_KEY) {
+  config({
+    path: `${process.cwd()}/.env`,
+    quiet: true,
+  } as any);
+}
+
+if (!env.OPENROUTER_API_KEY || !env.NVIDIA_API_KEY) {
+  console.error(
+    "Error: NVIDIA_API_KEY or OPENROUTER_API_KEY is missing. Please set them in your environment or a local .env file.",
+  );
+  process.exit(1);
+}
 
 // Register the providers used by the gateway.
 const registry = new ProviderRegistry();
@@ -20,13 +36,17 @@ registry.register(createNvidiaProvider(env.NVIDIA_API_KEY!));
 // Wire the registry into the gateway router.
 const gateway = new AIGateway(registry, new Router());
 
-// Create the MCP server exposed to Claude Desktop and the inspector.
+//- Session stats for the current runtime.
+const sessionStats = {
+  totalRequestsDelegated: 0,
+  totalTokensSaved: 0,
+};
+
 const server = new FastMCP({
   name: "Universal AI Gateway",
   version: "0.1.0",
 });
 
-// Health check tool.
 server.addTool({
   name: "health",
   description: "Gateway sisteminin calisip calismadigini kontrol eder.",
@@ -36,7 +56,20 @@ server.addTool({
   },
 });
 
-// Task delegation tool.
+server.addTool({
+  name: "get_session_stats",
+  description:
+    "Returns the total tokens saved and requests delegated during the current session.",
+  parameters: z.object({}),
+  execute: async () => {
+    return JSON.stringify({
+      status: "success",
+      stats: sessionStats,
+      message: `You have saved ${sessionStats.totalTokensSaved} tokens over ${sessionStats.totalRequestsDelegated} requests in this session.`,
+    });
+  },
+});
+
 server.addTool({
   name: "delegate_task",
   description:
@@ -49,6 +82,12 @@ server.addTool({
     intent: z
       .enum(["coding", "reasoning"])
       .describe("Task type. The router uses this to choose the model."),
+    specific_model: z
+      .string()
+      .optional()
+      .describe(
+        "Optional. Explicitly request a specific model (e.g., 'deepseek-ai/deepseek-v4-flash'). If omitted, the gateway will auto-route.",
+      ),
   }),
 
   execute: async (args) => {
@@ -56,16 +95,23 @@ server.addTool({
       const response = await gateway.chat(
         {
           messages: [{ role: "user", content: args.prompt }],
+          ...(args.specific_model ? { model: args.specific_model } : {}),
         },
         args.intent,
       );
+
+      const tokensSaved = response.usage?.totalTokens || 0;
+      sessionStats.totalTokensSaved += tokensSaved;
+      sessionStats.totalRequestsDelegated += 1;
+
+      const footer = `\n\n---\n💡 **UAG Stats:** This delegation saved ~${tokensSaved} tokens. Session total: ${sessionStats.totalTokensSaved} tokens saved over ${sessionStats.totalRequestsDelegated} requests.`;
 
       return JSON.stringify({
         status: "success",
         provider_used: response.provider,
         model_used: response.model,
-        tokens_saved: response.usage?.totalTokens || 0,
-        result: response.content,
+        tokens_saved: tokensSaved,
+        result: response.content + footer,
       });
     } catch (error: any) {
       return JSON.stringify({
