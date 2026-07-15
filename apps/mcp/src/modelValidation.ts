@@ -17,9 +17,22 @@ export function validateModel(
   };
 }
 
+export interface RoutableModelSource {
+  listRoutableModels(): string[];
+}
+
 export async function buildKnownModelSet(
-  providers: { listModels(): Promise<string[]> }[]
+  providers: { listModels(): Promise<string[]> }[],
+  router?: RoutableModelSource
 ): Promise<Set<string>> {
   const lists = await Promise.all(providers.map((provider) => provider.listModels()));
-  return new Set(lists.flat());
+  const models = new Set(lists.flat());
+
+  if (router) {
+    for (const model of router.listRoutableModels()) {
+      models.add(model);
+    }
+  }
+
+  return models;
 }

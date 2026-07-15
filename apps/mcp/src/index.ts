@@ -15,6 +15,7 @@ import {
   createDelegateTaskHandler,
   createGetSessionStatsHandler,
   createGetTaskResultHandler,
+  createHealthHandler,
 } from "./tools.js";
 
 process.env.DOTENV_QUIET = "true";
@@ -22,33 +23,43 @@ process.env.DOTENVX_QUIET = "true";
 
 // Fall back to a .env file in the user's current directory if the
 // required keys are not already present in the environment.
-if (!env.OPENROUTER_API_KEY || !env.NVIDIA_API_KEY) {
+if (!env.OPENROUTER_API_KEY && !env.NVIDIA_API_KEY) {
   config({
     path: `${process.cwd()}/.env`,
     quiet: true,
   } as any);
 }
 
-if (!env.OPENROUTER_API_KEY || !env.NVIDIA_API_KEY) {
+if (!env.OPENROUTER_API_KEY && !env.NVIDIA_API_KEY) {
   console.error(
-    "Error: NVIDIA_API_KEY or OPENROUTER_API_KEY is missing. Please set them in your environment or a local .env file.",
+    "Error: At least one of OPENROUTER_API_KEY or NVIDIA_API_KEY is required. " +
+      "Set them in your environment or a local .env file.",
   );
   process.exit(1);
 }
 
-// Register the providers used by the gateway.
 const registry = new ProviderRegistry();
+const router = new Router();
 
-registry.register(createOpenRouterProvider(env.OPENROUTER_API_KEY!));
-registry.register(createNvidiaProvider(env.NVIDIA_API_KEY!));
+if (env.OPENROUTER_API_KEY) {
+  registry.register(createOpenRouterProvider(env.OPENROUTER_API_KEY));
+}
 
-// Wire the registry into the gateway router.
-const gateway = new AIGateway(registry, new Router());
+if (env.NVIDIA_API_KEY) {
+  registry.register(createNvidiaProvider(env.NVIDIA_API_KEY));
+}
+
+if (registry.list().length === 0) {
+  console.error("Error: No providers could be registered.");
+  process.exit(1);
+}
+
+const gateway = new AIGateway(registry, router);
 
 const sessionStats = new SessionStats();
 const taskRegistry = new TaskRegistry();
-const knownModels = await buildKnownModelSet(registry.list());
-const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 55000);
+const knownModels = await buildKnownModelSet(registry.list(), router);
+const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 300_000);
 
 const delegateTask = createDelegateTaskHandler({
   chat: (request, task) => gateway.chat(request, task),
@@ -59,6 +70,7 @@ const delegateTask = createDelegateTaskHandler({
 });
 const getSessionStats = createGetSessionStatsHandler({ sessionStats });
 const getTaskResult = createGetTaskResultHandler({ taskRegistry });
+const health = createHealthHandler({ providers: registry.list() });
 
 const server = new FastMCP({
   name: "Universal AI Gateway",
@@ -67,11 +79,10 @@ const server = new FastMCP({
 
 server.addTool({
   name: "health",
-  description: "Gateway sisteminin calisip calismadigini kontrol eder.",
+  description:
+    "Checks whether the gateway and its registered providers are healthy.",
   parameters: z.object({}),
-  execute: async () => {
-    return JSON.stringify({ status: "ok", gateway: "Universal AI Gateway" });
-  },
+  execute: async () => health(),
 });
 
 server.addTool({
@@ -97,7 +108,8 @@ server.addTool({
 server.addTool({
   name: "delegate_task",
   description:
-    "Delegates coding or reasoning tasks through the gateway to save primary token usage.",
+    "Delegates coding or reasoning tasks through the gateway to save primary token usage. " +
+    "Free downstream models may take 3-4 minutes; progress updates are emitted while waiting.",
   parameters: z.object({
     prompt: z
       .string()
@@ -118,10 +130,14 @@ server.addTool({
         "Optional idempotency key. Reusing the same request_id from a prior call replays its cached result instead of dispatching a duplicate request.",
       ),
   }),
-  execute: async (args) => delegateTask(args),
+  timeoutMs: timeoutMs + 30_000,
+  execute: async (args, ctx) =>
+    delegateTask(args, {
+      reportProgress: ctx.reportProgress,
+      log: ctx.log,
+    }),
 });
 
-// Start the server over stdio.
 await server.start({
   transportType: "stdio",
 });

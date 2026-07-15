@@ -79,6 +79,9 @@ describe("delegate_task / get_session_stats regression", () => {
 
     // The timed-out request_id must now resolve via get_task_result.
     const timeoutResult = results.find((r) => r.status === "timeout");
+    const polledWhilePending = JSON.parse(await getTaskResult(timeoutResult.request_id));
+    expect(["timeout", "success"]).toContain(polledWhilePending.status);
+
     const polled = JSON.parse(await getTaskResult(timeoutResult.request_id));
     expect(polled.status).toBe("success");
 
@@ -130,6 +133,66 @@ describe("delegate_task / get_session_stats regression", () => {
     expect(second.cached).toBe(true);
     expect(deps.sessionStats.snapshot().totalRequestsDelegated).toBe(1);
     expect(first.request_id).toBe(second.request_id);
+  });
+
+  it("emits progress updates while waiting for a slow downstream model", async () => {
+    const deps = makeDeps();
+    const progress: Array<{ progress: number; total?: number }> = [];
+    const logs: string[] = [];
+
+    deps.chat = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 35));
+      return {
+        provider: "nvidia",
+        model: "m",
+        content: "done",
+        finishReason: "stop",
+        usage: { totalTokens: 5 },
+      };
+    };
+
+    const delegateTask = createDelegateTaskHandler({ ...deps, timeoutMs: 200 });
+    const result = JSON.parse(
+      await delegateTask(
+        { prompt: "slow", intent: "coding" },
+        {
+          reportProgress: async (tick) => {
+            progress.push(tick);
+          },
+          log: {
+            info: (message) => logs.push(message),
+          },
+        }
+      )
+    );
+
+    expect(result.status).toBe("success");
+    expect(progress[0]).toEqual({ progress: 0, total: 1 });
+    expect(logs[0]).toContain("Delegating to downstream model");
+  });
+
+  it("marks the task as timeout before background completion settles", async () => {
+    const deps = makeDeps();
+    deps.chat = async () => {
+      await new Promise((resolve) => setTimeout(resolve, 50));
+      return {
+        provider: "nvidia",
+        model: "m",
+        content: "late",
+        finishReason: "stop",
+        usage: { totalTokens: 5 },
+      };
+    };
+
+    const delegateTask = createDelegateTaskHandler({ ...deps, timeoutMs: 10 });
+    const getTaskResult = createGetTaskResultHandler(deps);
+
+    const raw = await delegateTask({ prompt: "slow", intent: "coding" });
+    const result = JSON.parse(raw);
+
+    expect(result.status).toBe("timeout");
+    const polled = JSON.parse(await getTaskResult(result.request_id));
+    expect(polled.status).toBe("timeout");
   });
 
   it("flags a truncated response in the result payload", async () => {

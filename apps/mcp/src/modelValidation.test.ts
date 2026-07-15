@@ -31,4 +31,11 @@ describe("buildKnownModelSet", () => {
     const set = await buildKnownModelSet(providers);
     expect([...set].sort()).toEqual(["a", "b", "c"]);
   });
+
+  it("also includes models exposed by the router", async () => {
+    const providers = [{ listModels: async () => ["provider/model"] }];
+    const router = { listRoutableModels: () => ["router/model", "provider/model"] };
+    const set = await buildKnownModelSet(providers, router);
+    expect([...set].sort()).toEqual(["provider/model", "router/model"]);
+  });
 });

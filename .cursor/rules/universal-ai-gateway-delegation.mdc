@@ -1,0 +1,47 @@
+---
+description: When to delegate work to Universal AI Gateway MCP to save primary tokens
+alwaysApply: true
+---
+
+# Universal AI Gateway — Delegation Policy
+
+Use the `user-universal-ai-gateway` MCP server (`delegate_task`, `get_task_result`, `get_session_stats`) to offload work from the primary model when it is clearly beneficial. **You decide** — the user does not need to ask each time.
+
+Free downstream models are slower (often 3–4 minutes) and less capable than the primary model. **Do not delegate every coding or fix task.** Prefer the primary model for repo-aware implementation, debugging, and quality-sensitive edits.
+
+## Delegate when
+
+- The task is **self-contained** and can be fully described in the `prompt` without live repo access
+- Output is a **draft** you will review, adapt, or integrate (utility snippet, regex, algorithm sketch, doc draft)
+- **Pure reasoning** with no file edits (math, comparisons, trade-off summaries)
+- The workload is **large and repetitive** in generation, not in judgment
+
+Use `intent: "coding"` for code generation; `intent: "reasoning"` for analysis. Reuse `request_id` when retrying the same delegation. If a call returns `timeout`, poll with `get_task_result`.
+
+## Do not delegate when
+
+- The task requires **reading, searching, or editing** project files
+- It is a **bug fix, refactor, or feature** that must match existing conventions and types
+- The change is **small** (a few lines) — delegation overhead is not worth it
+- **Security-sensitive** content would be sent downstream (secrets, credentials, private keys)
+- **Correctness and integration** matter more than token savings
+
+## Default workflow
+
+1. **Repo-touching work** → primary model: explore, implement, test, verify
+2. **Isolated sub-problem** → consider `delegate_task`, then review and integrate the result yourself
+3. **Uncertain** → stay on the primary model; only delegate if the sub-task is clearly separable
+
+## Quality bar after delegation
+
+Never paste delegated output blindly. Verify logic, types, naming, edge cases, and fit with the codebase before using or committing it.
+
+## Examples
+
+| Request | Action |
+|---------|--------|
+| "Fix the auth middleware bug in `apps/api`" | Primary model — needs repo context |
+| "Write a standalone `debounce` utility in TypeScript" | Delegate `coding`, then review |
+| "Compare mutex vs semaphore for this use case" | Delegate `reasoning` or answer inline if brief |
+| "Add tests for the change you just made" | Primary model — needs actual code |
+| "Generate a long README section about routing" | Delegate `coding` or `reasoning`, edit to match project tone |

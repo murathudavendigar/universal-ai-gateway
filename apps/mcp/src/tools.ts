@@ -8,7 +8,7 @@ import { screenPrompt } from "./moderation.js";
 import { validateModel } from "./modelValidation.js";
 import type { SessionStats } from "./sessionStats.js";
 import type { TaskRegistry } from "./taskRegistry.js";
-import { withTimeout } from "./timeout.js";
+import { withTimeoutAndProgress } from "./timeout.js";
 import { computeTokensSaved, TOKENS_SAVED_CALCULATION_METHOD, TOKENS_SAVED_EXPLANATION } from "./tokensSaved.js";
 
 export interface DelegateTaskArgs {
@@ -16,6 +16,13 @@ export interface DelegateTaskArgs {
   intent: TaskType;
   specific_model?: string;
   request_id?: string;
+}
+
+export interface DelegateTaskContext {
+  reportProgress?: (progress: { progress: number; total?: number }) => Promise<void>;
+  log?: {
+    info: (message: string) => void;
+  };
 }
 
 export interface DelegateTaskDeps {
@@ -34,7 +41,10 @@ function errorMessage(error: unknown): string {
 export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
   const generateId = deps.generateRequestId ?? randomUUID;
 
-  return async function delegateTask(args: DelegateTaskArgs): Promise<string> {
+  return async function delegateTask(
+    args: DelegateTaskArgs,
+    ctx?: DelegateTaskContext
+  ): Promise<string> {
     const moderation = screenPrompt(args.prompt);
     if (!moderation.allowed) {
       return JSON.stringify({
@@ -108,15 +118,39 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
       });
 
     try {
-      const raced = await withTimeout(dispatched, deps.timeoutMs);
+      const progressTotalSec = Math.ceil(deps.timeoutMs / 1000);
+
+      const raced = await withTimeoutAndProgress(
+        dispatched,
+        deps.timeoutMs,
+        async ({ elapsedMs }) => {
+          const elapsedSec = Math.floor(elapsedMs / 1000);
+          await ctx?.reportProgress?.({ progress: elapsedSec, total: progressTotalSec });
+          if (elapsedSec === 0) {
+            ctx?.log?.info(
+              "[UAG] Delegating to downstream model. Free models may take 3-4 minutes — waiting for response..."
+            );
+            return;
+          }
+
+          ctx?.log?.info(
+            `[UAG] Still processing downstream model (${elapsedSec}s elapsed, timeout ${progressTotalSec}s)...`
+          );
+        }
+      );
 
       if (raced.timedOut) {
+        deps.taskRegistry.markTimeout(requestId);
+        ctx?.log?.info(
+          `[UAG] Delegate call timed out after ${deps.timeoutMs}ms, but the downstream request may still finish. ` +
+            `Use get_task_result with request_id "${requestId}".`
+        );
         return JSON.stringify({
           status: "timeout",
           request_id: requestId,
           message:
             `The request timed out after ${deps.timeoutMs}ms but may still complete in the background. ` +
-            `Call get_task_result with request_id "${requestId}" to check whether it succeeded.`,
+            `Free models can take 3-4 minutes. Call get_task_result with request_id "${requestId}" to check whether it succeeded.`,
         });
       }
 
@@ -144,6 +178,52 @@ export function createGetSessionStatsHandler(deps: GetSessionStatsDeps) {
   };
 }
 
+export interface HealthCheckProvider {
+  name: string;
+  health(): Promise<boolean>;
+  listModels(): Promise<string[]>;
+}
+
+export interface HealthCheckDeps {
+  providers: HealthCheckProvider[];
+}
+
+export function createHealthHandler(deps: HealthCheckDeps) {
+  return async function health(): Promise<string> {
+    const checks = await Promise.all(
+      deps.providers.map(async (provider) => {
+        try {
+          const healthy = await provider.health();
+          const models = healthy ? await provider.listModels() : [];
+          return {
+            id: provider.name,
+            healthy,
+            model_count: models.length,
+          };
+        } catch {
+          return {
+            id: provider.name,
+            healthy: false,
+            model_count: 0,
+          };
+        }
+      })
+    );
+
+    const healthyCount = checks.filter((check) => check.healthy).length;
+
+    return JSON.stringify({
+      status: healthyCount > 0 ? "ok" : "degraded",
+      gateway: "Universal AI Gateway",
+      providers: checks,
+      message:
+        healthyCount > 0
+          ? `${healthyCount}/${checks.length} provider(s) healthy.`
+          : "No providers are currently healthy.",
+    });
+  };
+}
+
 export interface GetTaskResultDeps {
   taskRegistry: TaskRegistry;
 }
@@ -162,6 +242,15 @@ export function createGetTaskResultHandler(deps: GetTaskResultDeps) {
     return JSON.stringify({
       status: record.status,
       request_id: requestId,
+      elapsed_ms: Date.now() - record.createdAt,
+      ...(record.status === "pending" || record.status === "timeout"
+        ? {
+            message:
+              record.status === "pending"
+                ? "Downstream model is still processing. Free models may take 3-4 minutes."
+                : "The delegate call timed out, but the downstream request may still complete. Poll again with get_task_result.",
+          }
+        : {}),
       result: record.result,
       error: record.error,
     });
