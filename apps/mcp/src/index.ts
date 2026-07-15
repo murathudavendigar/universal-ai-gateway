@@ -8,6 +8,15 @@ import { AIGateway, ProviderRegistry, Router } from "@uag/core";
 import { createNvidiaProvider } from "@uag/provider-nvidia";
 import { createOpenRouterProvider } from "@uag/provider-openrouter";
 
+import { buildKnownModelSet } from "./modelValidation.js";
+import { SessionStats } from "./sessionStats.js";
+import { TaskRegistry } from "./taskRegistry.js";
+import {
+  createDelegateTaskHandler,
+  createGetSessionStatsHandler,
+  createGetTaskResultHandler,
+} from "./tools.js";
+
 process.env.DOTENV_QUIET = "true";
 process.env.DOTENVX_QUIET = "true";
 
@@ -36,11 +45,20 @@ registry.register(createNvidiaProvider(env.NVIDIA_API_KEY!));
 // Wire the registry into the gateway router.
 const gateway = new AIGateway(registry, new Router());
 
-//- Session stats for the current runtime.
-const sessionStats = {
-  totalRequestsDelegated: 0,
-  totalTokensSaved: 0,
-};
+const sessionStats = new SessionStats();
+const taskRegistry = new TaskRegistry();
+const knownModels = await buildKnownModelSet(registry.list());
+const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 55000);
+
+const delegateTask = createDelegateTaskHandler({
+  chat: (request, task) => gateway.chat(request, task),
+  sessionStats,
+  taskRegistry,
+  knownModels,
+  timeoutMs,
+});
+const getSessionStats = createGetSessionStatsHandler({ sessionStats });
+const getTaskResult = createGetTaskResultHandler({ taskRegistry });
 
 const server = new FastMCP({
   name: "Universal AI Gateway",
@@ -61,20 +79,25 @@ server.addTool({
   description:
     "Returns the total tokens saved and requests delegated during the current session.",
   parameters: z.object({}),
-  execute: async () => {
-    return JSON.stringify({
-      status: "success",
-      stats: sessionStats,
-      message: `You have saved ${sessionStats.totalTokensSaved} tokens over ${sessionStats.totalRequestsDelegated} requests in this session.`,
-    });
-  },
+  execute: async () => getSessionStats(),
+});
+
+server.addTool({
+  name: "get_task_result",
+  description:
+    "Given a request_id returned by delegate_task, returns the current status " +
+    "(pending/success/error/timeout) and the result if available. Use this after " +
+    "a delegate_task call times out to check whether the downstream request actually completed.",
+  parameters: z.object({
+    request_id: z.string().describe("The request_id returned by a prior delegate_task call."),
+  }),
+  execute: async (args) => getTaskResult(args.request_id),
 });
 
 server.addTool({
   name: "delegate_task",
   description:
     "Delegates coding or reasoning tasks through the gateway to save primary token usage.",
-
   parameters: z.object({
     prompt: z
       .string()
@@ -88,38 +111,14 @@ server.addTool({
       .describe(
         "Optional. Explicitly request a specific model (e.g., 'deepseek-ai/deepseek-v4-flash'). If omitted, the gateway will auto-route.",
       ),
+    request_id: z
+      .string()
+      .optional()
+      .describe(
+        "Optional idempotency key. Reusing the same request_id from a prior call replays its cached result instead of dispatching a duplicate request.",
+      ),
   }),
-
-  execute: async (args) => {
-    try {
-      const response = await gateway.chat(
-        {
-          messages: [{ role: "user", content: args.prompt }],
-          ...(args.specific_model ? { model: args.specific_model } : {}),
-        },
-        args.intent,
-      );
-
-      const tokensSaved = response.usage?.totalTokens || 0;
-      sessionStats.totalTokensSaved += tokensSaved;
-      sessionStats.totalRequestsDelegated += 1;
-
-      const footer = `\n\n---\n💡 **UAG Stats:** This delegation saved ~${tokensSaved} tokens. Session total: ${sessionStats.totalTokensSaved} tokens saved over ${sessionStats.totalRequestsDelegated} requests.`;
-
-      return JSON.stringify({
-        status: "success",
-        provider_used: response.provider,
-        model_used: response.model,
-        tokens_saved: tokensSaved,
-        result: response.content + footer,
-      });
-    } catch (error: any) {
-      return JSON.stringify({
-        status: "error",
-        message: error.message || "The gateway could not handle the request.",
-      });
-    }
-  },
+  execute: async (args) => delegateTask(args),
 });
 
 // Start the server over stdio.

@@ -100,6 +100,18 @@ importers:
       '@modelcontextprotocol/sdk':
         specifier: ^1.29.0
         version: 1.29.0(zod@4.4.3)
+      '@uag/core':
+        specifier: workspace:*
+        version: link:../../packages/core
+      '@uag/provider-nvidia':
+        specifier: workspace:*
+        version: link:../../packages/provider-nvidia
+      '@uag/provider-openrouter':
+        specifier: workspace:*
+        version: link:../../packages/provider-openrouter
+      '@uag/sdk':
+        specifier: workspace:*
+        version: link:../../packages/sdk
       dotenv:
         specifier: ^17.4.2
         version: 17.4.2

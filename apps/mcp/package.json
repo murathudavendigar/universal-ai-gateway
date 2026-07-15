@@ -17,6 +17,10 @@
   "dependencies": {
     "fastmcp": "^4.4.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@uag/core": "workspace:*",
+    "@uag/sdk": "workspace:*",
+    "@uag/provider-nvidia": "workspace:*",
+    "@uag/provider-openrouter": "workspace:*",
     "zod": "^4.4.3",
     "dotenv": "^17.4.2"
   }
