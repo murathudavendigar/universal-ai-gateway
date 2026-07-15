@@ -19,6 +19,7 @@ export interface ChatResponse {
   provider: string;
   model: string;
   content: string;
+  finishReason?: string;
 
   usage?: {
     promptTokens?: number;
@@ -31,6 +32,7 @@ export interface ChatChunk {
   provider: string;
   model: string;
   content: string;
+  finishReason?: string;
 
   done?: boolean;
 

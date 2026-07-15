@@ -27,6 +27,7 @@ export class NvidiaProvider implements AIProvider {
       provider: this.name,
       model: response.model,
       content: response.choices[0]?.message?.content ?? "",
+      finishReason: response.choices[0]?.finish_reason ?? undefined,
       usage: {
         promptTokens: response.usage?.prompt_tokens,
         completionTokens: response.usage?.completion_tokens,
@@ -61,6 +62,7 @@ export class NvidiaProvider implements AIProvider {
         provider: this.name,
         model: parsed.model ?? request.model,
         content: choice?.delta?.content ?? "",
+        finishReason: choice?.finish_reason ?? undefined,
         done: finished,
         ...(finished && parsed.usage
           ? {

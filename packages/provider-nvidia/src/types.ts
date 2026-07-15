@@ -2,6 +2,7 @@ export interface NvidiaChatChoice {
   message: {
     content: string;
   };
+  finish_reason?: string | null;
 }
 
 export interface NvidiaUsage {
