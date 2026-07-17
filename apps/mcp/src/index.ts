@@ -5,18 +5,17 @@ import { env } from "node:process";
 import { z } from "zod";
 
 import { AIGateway, ProviderRegistry, Router } from "@uag/core";
-import { createNvidiaProvider } from "@uag/provider-nvidia";
-import { createOpenRouterProvider } from "@uag/provider-openrouter";
-
-import { buildKnownModelSet } from "./modelValidation.js";
-import { SessionStats } from "./sessionStats.js";
-import { TaskRegistry } from "./taskRegistry.js";
 import {
+  buildKnownModelSet,
   createDelegateTaskHandler,
   createGetSessionStatsHandler,
   createGetTaskResultHandler,
   createHealthHandler,
-} from "./tools.js";
+  SessionStats,
+  TaskRegistry,
+} from "@uag/operator";
+import { createNvidiaProvider } from "@uag/provider-nvidia";
+import { createOpenRouterProvider } from "@uag/provider-openrouter";
 
 process.env.DOTENV_QUIET = "true";
 process.env.DOTENVX_QUIET = "true";

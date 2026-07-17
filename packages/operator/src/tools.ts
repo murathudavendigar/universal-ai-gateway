@@ -74,7 +74,11 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
       });
     }
 
-    deps.taskRegistry.create(requestId);
+    deps.taskRegistry.create(requestId, {
+      promptPreview: args.prompt.slice(0, 200),
+      intent: args.intent,
+      model: args.specific_model,
+    });
 
     const dispatched = chatWithContinuation(
       (req) => deps.chat({ messages: req.messages, model: req.model }, args.intent),

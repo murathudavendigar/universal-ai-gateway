@@ -3,11 +3,13 @@ import { env } from "node:process";
 import { describe, expect, it } from "vitest";
 
 import { AIGateway, ProviderRegistry, Router } from "@uag/core";
+import {
+  buildKnownModelSet,
+  createDelegateTaskHandler,
+  createHealthHandler,
+} from "@uag/operator";
 import { createNvidiaProvider } from "@uag/provider-nvidia";
 import { createOpenRouterProvider } from "@uag/provider-openrouter";
-
-import { buildKnownModelSet } from "./modelValidation.js";
-import { createDelegateTaskHandler, createHealthHandler } from "./tools.js";
 
 config({ path: `${process.cwd()}/.env`, quiet: true } as any);
 

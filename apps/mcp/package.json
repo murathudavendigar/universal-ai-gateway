@@ -18,6 +18,7 @@
     "fastmcp": "^4.4.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
     "@uag/core": "workspace:*",
+    "@uag/operator": "workspace:*",
     "@uag/sdk": "workspace:*",
     "@uag/provider-nvidia": "workspace:*",
     "@uag/provider-openrouter": "workspace:*",

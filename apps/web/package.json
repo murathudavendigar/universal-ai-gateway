@@ -12,9 +12,17 @@
   },
   "dependencies": {
     "@repo/ui": "workspace:*",
+    "@uag/core": "workspace:*",
+    "@uag/operator": "workspace:*",
+    "@uag/provider-nvidia": "workspace:*",
+    "@uag/provider-openrouter": "workspace:*",
+    "dotenv": "^17.4.2",
     "next": "16.2.0",
     "react": "^19.2.0",
-    "react-dom": "^19.2.0"
+    "react-dom": "^19.2.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "server-only": "^0.0.1"
   },
   "devDependencies": {
     "@repo/eslint-config": "workspace:*",
