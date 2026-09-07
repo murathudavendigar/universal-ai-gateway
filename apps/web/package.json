@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "next dev --port 3000",
     "build": "next build",
+    "build:vercel": "cd ../.. && pnpm --filter @uag/sdk build && pnpm --filter @uag/core build && pnpm --filter @uag/provider-openrouter build && pnpm --filter @uag/provider-nvidia build && pnpm --filter @uag/operator build && pnpm --filter web build",
     "start": "next start",
     "lint": "eslint --max-warnings 0",
     "check-types": "next typegen && tsc --noEmit"

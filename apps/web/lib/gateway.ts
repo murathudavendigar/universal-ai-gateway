@@ -34,6 +34,8 @@ type GatewayRuntime = {
   sessionStats: SessionStats;
   knownModels: ReadonlySet<string>;
   timeoutMs: number;
+  unhealthyProviders: () => ReadonlySet<string>;
+  refreshHealthCache: () => Promise<void>;
   delegateTask: ReturnType<typeof createDelegateTaskHandler>;
   getSessionStats: ReturnType<typeof createGetSessionStatsHandler>;
   getTaskResult: ReturnType<typeof createGetTaskResultHandler>;
@@ -42,11 +44,11 @@ type GatewayRuntime = {
 
 const globalForGateway = globalThis as typeof globalThis & {
   __uagGatewayPromise?: Promise<GatewayRuntime>;
+  __uagUnhealthyProviders?: Set<string>;
+  __uagHealthCheckedAt?: number;
 };
 
 function loadEnv(): void {
-  if (env.OPENROUTER_API_KEY || env.NVIDIA_API_KEY) return;
-
   const candidates = [
     path.join(process.cwd(), ".env"),
     path.join(process.cwd(), "../../.env"),
@@ -54,7 +56,6 @@ function loadEnv(): void {
 
   for (const filePath of candidates) {
     config({ path: filePath, quiet: true } as Parameters<typeof config>[0]);
-    if (env.OPENROUTER_API_KEY || env.NVIDIA_API_KEY) return;
   }
 }
 
@@ -84,6 +85,29 @@ async function createRuntime(): Promise<GatewayRuntime> {
 
   const gateway = new AIGateway(registry, router);
   const sessionStats = new SessionStats();
+  const health = createHealthHandler({ providers: registry.list() });
+
+  const refreshHealthCache = async () => {
+    try {
+      const payload = JSON.parse(await health()) as {
+        providers?: Array<{ id: string; healthy: boolean }>;
+      };
+      const unhealthy = new Set<string>();
+      for (const provider of payload.providers ?? []) {
+        if (!provider.healthy) unhealthy.add(provider.id);
+      }
+      globalForGateway.__uagUnhealthyProviders = unhealthy;
+      globalForGateway.__uagHealthCheckedAt = Date.now();
+    } catch {
+      /* keep previous cache */
+    }
+  };
+
+  const unhealthyProviders = () =>
+    globalForGateway.__uagUnhealthyProviders ?? new Set<string>();
+
+  // Warm health cache without blocking startup forever.
+  void refreshHealthCache();
 
   let persistTimer: ReturnType<typeof setTimeout> | undefined;
   const schedulePersist = (taskRegistry: TaskRegistry) => {
@@ -107,7 +131,15 @@ async function createRuntime(): Promise<GatewayRuntime> {
   const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 300_000);
 
   const delegateTask = createDelegateTaskHandler({
-    chat: (request, task) => gateway.chat(request, task),
+    chat: async (request, task) => {
+      const checkedAt = globalForGateway.__uagHealthCheckedAt ?? 0;
+      if (Date.now() - checkedAt > 60_000) {
+        void refreshHealthCache();
+      }
+      return gateway.chat(request, task, {
+        skipProviderIds: unhealthyProviders(),
+      });
+    },
     sessionStats,
     taskRegistry,
     knownModels,
@@ -121,10 +153,12 @@ async function createRuntime(): Promise<GatewayRuntime> {
     sessionStats,
     knownModels,
     timeoutMs,
+    unhealthyProviders,
+    refreshHealthCache,
     delegateTask,
     getSessionStats: createGetSessionStatsHandler({ sessionStats }),
     getTaskResult: createGetTaskResultHandler({ taskRegistry }),
-    health: createHealthHandler({ providers: registry.list() }),
+    health,
   };
 }
 

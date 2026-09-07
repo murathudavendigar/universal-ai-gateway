@@ -1,17 +1,19 @@
 import { NextResponse } from "next/server";
 
-import { requireAuth } from "../../../lib/auth";
+import { guardApi } from "../../../lib/apiGuard";
 import { getGateway, jsonFromHandler } from "../../../lib/gateway";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const unauthorized = requireAuth(request);
-  if (unauthorized) return unauthorized;
+  const blocked = guardApi(request);
+  if (blocked) return blocked;
 
   try {
-    const { health } = await getGateway();
-    return jsonFromHandler(await health());
+    const { health, refreshHealthCache } = await getGateway();
+    const response = jsonFromHandler(await health());
+    void refreshHealthCache();
+    return response;
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     return NextResponse.json({ status: "error", message }, { status: 503 });

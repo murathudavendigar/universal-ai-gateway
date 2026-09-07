@@ -9,9 +9,19 @@ This package exposes the gateway to stdio-based MCP clients such as Cursor, Clau
 | Tool | Purpose |
 |------|---------|
 | `health` | Checks gateway status and pings registered providers |
+| `list_routing` | Intent→model chains, known model IDs, and when to use `specific_model` |
 | `delegate_task` | Sends a coding or reasoning task to a downstream model |
 | `get_session_stats` | Returns session-level delegation counters |
 | `get_task_result` | Polls a prior `request_id` after timeout or while pending |
+
+### Intent → auto-route (see also `list_routing`)
+
+| Intent | Chain |
+|--------|--------|
+| `coding` | GPT-OSS 120B → Nemotron Ultra 550B → Super 120B |
+| `reasoning` | Nemotron Ultra 550B → Super 120B → GPT-OSS 120B |
+
+Prefer omitting `specific_model`. Call `list_routing` when unsure.
 
 ## Environment
 
@@ -27,7 +37,7 @@ If keys are not already in the environment, the server falls back to `./.env` in
 
 ## Cursor setup
 
-Add this to your MCP config:
+Prefer copying [`.cursor/mcp.json.example`](../../.cursor/mcp.json.example) to a local `.cursor/mcp.json` (gitignored). Or add this to your user MCP config:
 
 ```json
 {

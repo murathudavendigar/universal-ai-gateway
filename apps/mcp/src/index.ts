@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { config } from "dotenv";
 import { FastMCP } from "fastmcp";
+import { dirname, resolve } from "node:path";
 import { env } from "node:process";
+import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
 import { AIGateway, ProviderRegistry, Router } from "@uag/core";
@@ -11,6 +13,8 @@ import {
   createGetSessionStatsHandler,
   createGetTaskResultHandler,
   createHealthHandler,
+  createListRoutingHandler,
+  DELEGATE_TASK_TOOL_DESCRIPTION,
   SessionStats,
   TaskRegistry,
 } from "@uag/operator";
@@ -20,13 +24,21 @@ import { createOpenRouterProvider } from "@uag/provider-openrouter";
 process.env.DOTENV_QUIET = "true";
 process.env.DOTENVX_QUIET = "true";
 
-// Fall back to a .env file in the user's current directory if the
-// required keys are not already present in the environment.
+process.env.DOTENV_QUIET = "true";
+process.env.DOTENVX_QUIET = "true";
+
+// Prefer env already set by the MCP host; otherwise load repo / cwd .env files.
 if (!env.OPENROUTER_API_KEY && !env.NVIDIA_API_KEY) {
-  config({
-    path: `${process.cwd()}/.env`,
-    quiet: true,
-  } as any);
+  const here = dirname(fileURLToPath(import.meta.url));
+  const candidates = [
+    resolve(process.cwd(), ".env"),
+    resolve(here, "../../../.env"),
+    resolve(here, "../../../../.env"),
+  ];
+  for (const path of candidates) {
+    config({ path, quiet: true } as any);
+    if (env.OPENROUTER_API_KEY || env.NVIDIA_API_KEY) break;
+  }
 }
 
 if (!env.OPENROUTER_API_KEY && !env.NVIDIA_API_KEY) {
@@ -70,6 +82,7 @@ const delegateTask = createDelegateTaskHandler({
 const getSessionStats = createGetSessionStatsHandler({ sessionStats });
 const getTaskResult = createGetTaskResultHandler({ taskRegistry });
 const health = createHealthHandler({ providers: registry.list() });
+const listRouting = createListRoutingHandler({ router, knownModels });
 
 const server = new FastMCP({
   name: "Universal AI Gateway",
@@ -79,9 +92,20 @@ const server = new FastMCP({
 server.addTool({
   name: "health",
   description:
-    "Checks whether the gateway and its registered providers are healthy.",
+    "Checks whether the gateway and its registered providers are healthy. " +
+    "Call before heavy delegation if a previous request failed with provider errors.",
   parameters: z.object({}),
   execute: async () => health(),
+});
+
+server.addTool({
+  name: "list_routing",
+  description:
+    "Returns intent→model fallback chains, known model IDs, and guidance for when to use " +
+    "coding vs reasoning and when (rarely) to set specific_model. " +
+    "Call this when unsure which model or intent to pick before delegate_task.",
+  parameters: z.object({}),
+  execute: async () => listRouting(),
 });
 
 server.addTool({
@@ -106,21 +130,27 @@ server.addTool({
 
 server.addTool({
   name: "delegate_task",
-  description:
-    "Delegates coding or reasoning tasks through the gateway to save primary token usage. " +
-    "Free downstream models may take 3-4 minutes; progress updates are emitted while waiting.",
+  description: DELEGATE_TASK_TOOL_DESCRIPTION,
   parameters: z.object({
     prompt: z
       .string()
-      .describe("Detailed task or coding instruction to send to the submodel."),
+      .describe(
+        "Self-contained instruction for the submodel. Include all context inline — " +
+          "the downstream model cannot read the repo.",
+      ),
     intent: z
       .enum(["coding", "reasoning"])
-      .describe("Task type. The router uses this to choose the model."),
+      .describe(
+        "coding = generate/transform code drafts; reasoning = analysis, comparisons, trade-offs, math. " +
+          "Router picks the fallback chain from this intent.",
+      ),
     specific_model: z
       .string()
       .optional()
       .describe(
-        "Optional. Explicitly request a specific model (e.g., 'deepseek-ai/deepseek-v4-flash'). If omitted, the gateway will auto-route.",
+        "Optional override. Prefer omitting (auto-route). Only set to a model ID from list_routing " +
+          "(e.g. openai/gpt-oss-120b for coding speed, nvidia/nemotron-3-ultra-550b-a55b for hard reasoning). " +
+          "Do not invent IDs.",
       ),
     request_id: z
       .string()

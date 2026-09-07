@@ -213,4 +213,39 @@ describe("delegate_task / get_session_stats regression", () => {
     expect(result.truncation_reason).toBe("length");
     expect(result.calculation_method).toBe("downstream_total_tokens_v1");
   });
+
+  it("accepts multi-turn messages and forwards them to chat", async () => {
+    const deps = makeDeps();
+    let seen: unknown;
+    deps.chat = async (request) => {
+      seen = request.messages;
+      return {
+        provider: "nvidia",
+        model: "m",
+        content: "continued",
+        finishReason: "stop",
+        usage: { totalTokens: 4 },
+      };
+    };
+
+    const delegateTask = createDelegateTaskHandler(deps);
+    const result = JSON.parse(
+      await delegateTask({
+        prompt: "follow up",
+        intent: "chat",
+        messages: [
+          { role: "user", content: "hello" },
+          { role: "assistant", content: "hi" },
+          { role: "user", content: "follow up" },
+        ],
+      })
+    );
+
+    expect(result.status).toBe("success");
+    expect(seen).toEqual([
+      { role: "user", content: "hello" },
+      { role: "assistant", content: "hi" },
+      { role: "user", content: "follow up" },
+    ]);
+  });
 });

@@ -8,8 +8,25 @@ export type GatewayChatRequest = Omit<ChatRequest, "model"> & {
   model?: string;
 };
 
+export interface GatewayChatOptions {
+  /** Prefer skipping these providers when healthier alternatives remain. */
+  skipProviderIds?: ReadonlySet<string>;
+}
+
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function orderPlans(
+  plans: ReturnType<Router["route"]>,
+  skipProviderIds?: ReadonlySet<string>
+) {
+  if (!skipProviderIds?.size) return plans;
+  const preferred = plans.filter((plan) => !skipProviderIds.has(plan.providerId));
+  const deferred = plans.filter((plan) => skipProviderIds.has(plan.providerId));
+  // Keep unhealthy providers as last-resort fallbacks so we don't hard-fail
+  // when every registered provider is temporarily marked unhealthy.
+  return preferred.length > 0 ? [...preferred, ...deferred] : plans;
 }
 
 export class AIGateway {
@@ -20,9 +37,10 @@ export class AIGateway {
 
   async chat(
     request: GatewayChatRequest,
-    task: TaskType = "chat"
+    task: TaskType = "chat",
+    options?: GatewayChatOptions
   ): Promise<ChatResponse> {
-    const plans = this.router.route({ task });
+    const plans = orderPlans(this.router.route({ task }), options?.skipProviderIds);
 
     let lastError: unknown;
 
@@ -49,9 +67,10 @@ export class AIGateway {
 
   async *streamChat(
     request: GatewayChatRequest,
-    task: TaskType = "chat"
+    task: TaskType = "chat",
+    options?: GatewayChatOptions
   ): AsyncGenerator<ChatChunk, void, unknown> {
-    const plans = this.router.route({ task });
+    const plans = orderPlans(this.router.route({ task }), options?.skipProviderIds);
 
     let lastError: unknown;
 

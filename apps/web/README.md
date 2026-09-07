@@ -16,10 +16,14 @@ Open [http://localhost:3000](http://localhost:3000).
 ## Features
 
 - **Playground** — prompt + intent (`chat` / `coding` / `reasoning` / `documentation` / `review`) + optional model
-- **Polling** — long free-model runs return `pending`/`timeout`; the UI polls `/api/tasks/:id`
-- **History** — last 200 tasks, persisted to `apps/web/.data/tasks.json`
-- **Routing** — intent → fallback chain table
-- **Health / stats** — provider status and session token-savings counters
+- **Modes** — `single`, multi-turn `thread`, and `compare` (two models)
+- **Templates** — explain / refactor / tests / review / debug / docs presets
+- **Polling + progress** — long free-model runs show elapsed time and poll `/api/tasks/:id`
+- **History** — server tasks merged with browser `localStorage` (survives Vercel cold starts in your browser)
+- **Analytics** — local success rate, tokens saved, top intent/model
+- **Routing** — intent → fallback chain; unhealthy providers are deferred
+- **Health / stats** — provider status and session counters
+- **Rate limit** — ~40 req/min per bearer token / IP
 
 ## Auth
 
@@ -45,5 +49,7 @@ Paste the same token into the console’s Bearer field (stored in `localStorage`
 ## Notes
 
 - Provider keys stay server-side; the browser only talks to `/api/*`.
-- Task registry is in-process memory with file durability. Multiple Next.js instances do **not** share state — run a single process.
+- Server task registry is in-process (+ local `.data/tasks.json` when the filesystem is writable). On Vercel this is ephemeral — the UI also keeps a browser-side history merge.
+- Multiple Next.js instances do **not** share server memory.
 - Free models may take several minutes; default timeout is `UAG_DELEGATE_TIMEOUT_MS` (300000).
+- Compare mode uses two model calls — prefer faster models to stay within free-tier limits.

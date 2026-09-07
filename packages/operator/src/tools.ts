@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 
-import type { ChatResponse } from "@uag/sdk/provider";
+import type { ChatMessage, ChatResponse } from "@uag/sdk/provider";
 import type { GatewayChatRequest, TaskType } from "@uag/core";
 
 import { chatWithContinuation } from "./continuation.js";
@@ -9,13 +9,19 @@ import { validateModel } from "./modelValidation.js";
 import type { SessionStats } from "./sessionStats.js";
 import type { TaskRegistry } from "./taskRegistry.js";
 import { withTimeoutAndProgress } from "./timeout.js";
-import { computeTokensSaved, TOKENS_SAVED_CALCULATION_METHOD, TOKENS_SAVED_EXPLANATION } from "./tokensSaved.js";
+import {
+  computeTokensSaved,
+  TOKENS_SAVED_CALCULATION_METHOD,
+  TOKENS_SAVED_EXPLANATION,
+} from "./tokensSaved.js";
 
 export interface DelegateTaskArgs {
   prompt: string;
   intent: TaskType;
   specific_model?: string;
   request_id?: string;
+  /** Optional multi-turn history. When set, replaces the single-prompt message list. */
+  messages?: ChatMessage[];
 }
 
 export interface DelegateTaskContext {
@@ -38,6 +44,24 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+function buildMessages(args: DelegateTaskArgs): ChatMessage[] {
+  if (args.messages && args.messages.length > 0) {
+    return args.messages.map((message) => ({
+      role: message.role,
+      content: String(message.content ?? ""),
+    }));
+  }
+  return [{ role: "user", content: args.prompt }];
+}
+
+function moderationText(args: DelegateTaskArgs, messages: ChatMessage[]): string {
+  const userBits = messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content)
+    .join("\n");
+  return userBits || args.prompt;
+}
+
 export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
   const generateId = deps.generateRequestId ?? randomUUID;
 
@@ -45,7 +69,15 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
     args: DelegateTaskArgs,
     ctx?: DelegateTaskContext
   ): Promise<string> {
-    const moderation = screenPrompt(args.prompt);
+    const messages = buildMessages(args);
+    if (messages.length === 0 || !messages.some((m) => m.content.trim())) {
+      return JSON.stringify({
+        status: "error",
+        message: "prompt or messages with content are required.",
+      });
+    }
+
+    const moderation = screenPrompt(moderationText(args, messages));
     if (!moderation.allowed) {
       return JSON.stringify({
         status: "blocked",
@@ -63,26 +95,36 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
     const existing = deps.taskRegistry.get(requestId);
 
     if (existing?.status === "success") {
-      return JSON.stringify({ ...(existing.result as Record<string, unknown>), request_id: requestId, cached: true });
+      return JSON.stringify({
+        ...(existing.result as Record<string, unknown>),
+        request_id: requestId,
+        cached: true,
+      });
     }
 
     if (existing?.status === "pending") {
       return JSON.stringify({
         status: "pending",
         request_id: requestId,
-        message: "This request_id is already being processed. Call get_task_result to check on it.",
+        message:
+          "This request_id is already being processed. Call get_task_result to check on it.",
       });
     }
 
+    const previewSource =
+      args.prompt?.trim() ||
+      [...messages].reverse().find((m) => m.role === "user")?.content ||
+      "";
+
     deps.taskRegistry.create(requestId, {
-      promptPreview: args.prompt.slice(0, 200),
+      promptPreview: previewSource.slice(0, 200),
       intent: args.intent,
       model: args.specific_model,
     });
 
     const dispatched = chatWithContinuation(
       (req) => deps.chat({ messages: req.messages, model: req.model }, args.intent),
-      { messages: [{ role: "user", content: args.prompt }], model: args.specific_model }
+      { messages, model: args.specific_model }
     )
       .then((continuationResult) => {
         const tokensSaved = computeTokensSaved(continuationResult.response.usage);
@@ -160,7 +202,11 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
 
       return JSON.stringify(raced.value);
     } catch (error: unknown) {
-      return JSON.stringify({ status: "error", request_id: requestId, message: errorMessage(error) });
+      return JSON.stringify({
+        status: "error",
+        request_id: requestId,
+        message: errorMessage(error),
+      });
     }
   };
 }

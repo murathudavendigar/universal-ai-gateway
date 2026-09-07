@@ -37,3 +37,11 @@ export type {
   HealthCheckDeps,
   HealthCheckProvider,
 } from "./tools.js";
+
+export {
+  createListRoutingHandler,
+  DELEGATE_TASK_TOOL_DESCRIPTION,
+  ROUTABLE_TASK_TYPES,
+  ROUTING_GUIDANCE,
+} from "./routingGuide.js";
+export type { ListRoutingDeps, RoutingSource } from "./routingGuide.js";

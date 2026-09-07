@@ -153,3 +153,18 @@
   background: color-mix(in srgb, var(--fg) 4%, transparent);
   font-weight: 600;
 }
+
+.copyBtn {
+  align-self: flex-start;
+  border: 1px solid var(--border);
+  background: transparent;
+  color: var(--fg);
+  padding: 0.3rem 0.55rem;
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-family: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+.copyBtn:hover {
+  border-color: var(--fg);
+}

@@ -8,7 +8,7 @@ Route AI workloads through a shared gateway, pick the right free model per task,
 - **Provider adapters** — OpenRouter and NVIDIA NIM integrations
 - **Operator package** (`@uag/operator`) — shared delegate handlers, task registry, moderation, and stats used by MCP and the web console
 - **MCP server** (`apps/mcp`) — exposes `delegate_task` to Cursor, Claude Desktop, and other MCP clients
-- **Web operator console** (`apps/web`) — personal UI to run delegates, inspect history, routing, health, and stats
+- **Web operator console** (`apps/web`) — personal UI with single/thread/compare modes, templates, durable browser history, analytics, and rate-limited APIs
 - **Task-aware routing** — coding, reasoning, documentation, review, and chat each get their own model chain
 
 Free downstream models can be slow (often 3–4 minutes). The MCP server waits up to 5 minutes by default and emits progress updates while a request is in flight.
@@ -56,7 +56,13 @@ Open [http://localhost:3000](http://localhost:3000). See [apps/web/README.md](ap
 
 ### 5. Run the MCP server (Cursor)
 
-Add to your MCP config:
+Copy the template and point it at your absolute path (project `.cursor/mcp.json` is gitignored):
+
+```sh
+cp .cursor/mcp.json.example .cursor/mcp.json
+```
+
+Or add the same block to your user MCP config:
 
 ```json
 {
@@ -73,18 +79,19 @@ Add to your MCP config:
 }
 ```
 
-See [apps/mcp/README.md](apps/mcp/README.md) for tool reference, dev mode, and timeout settings.
+After code changes that affect MCP tools, rebuild `@uag/mcp` (and dependencies) and restart the MCP server in Cursor. See [apps/mcp/README.md](apps/mcp/README.md) for tool reference, dev mode, and timeout settings.
 
 ## MCP tools
 
 | Tool | Purpose |
 |------|---------|
 | `health` | Ping registered providers |
+| `list_routing` | Intent→model chains + guidance for `specific_model` |
 | `delegate_task` | Send a coding or reasoning task to a downstream model |
 | `get_session_stats` | Session-level token-savings counters |
 | `get_task_result` | Poll a `request_id` after timeout or while pending |
 
-`delegate_task` supports idempotency via `request_id`, input moderation, model validation, automatic truncation recovery, and background completion after timeout.
+`delegate_task` supports idempotency via `request_id`, input moderation, model validation, automatic truncation recovery, and background completion after timeout. Prefer auto-route; use `list_routing` before overriding `specific_model`.
 
 ## Routing
 
@@ -92,10 +99,10 @@ The router picks a fallback chain per task. If the first model fails, the gatewa
 
 | Task | Primary chain |
 |------|----------------|
-| `coding` | DeepSeek Flash → Qwen 397B → GPT-OSS 120B |
-| `reasoning` | Nemotron Ultra 550B → Nemotron Super 120B → Llama 70B |
-| `documentation` | Cohere North Mini |
-| `review` / `chat` | Nemotron Super 120B |
+| `coding` | GPT-OSS 120B → Nemotron Ultra 550B → Super 120B |
+| `reasoning` | Nemotron Ultra 550B → Super 120B → GPT-OSS 120B |
+| `documentation` | GPT-OSS 120B → Nemotron Super 120B |
+| `review` / `chat` | Nemotron Super 120B → GPT-OSS 120B → Ultra 550B |
 
 Routing lives in `packages/core/src/router.ts`.
 
@@ -106,10 +113,11 @@ MCP client (Cursor)          Browser (operator console)
        │                              │
        ▼                              ▼
   apps/mcp                    apps/web /api/*
+  (delegate / list_routing)            │
        │                              │
        └──────────┬───────────────────┘
                   ▼
-           @uag/operator  ── handlers + TaskRegistry + SessionStats
+           @uag/operator  ── handlers + TaskRegistry + SessionStats + routing guide
                   │
                   ▼
             @uag/core  ── AIGateway + Router + ProviderRegistry
@@ -132,7 +140,7 @@ MCP client (Cursor)          Browser (operator console)
 | `packages/provider-openrouter` | OpenRouter adapter |
 | `packages/provider-nvidia` | NVIDIA adapter |
 | `packages/shared` | Shared types and helpers |
-| `examples/` | Runnable gateway smoke tests |
+| `examples/` | Smoke tests, model probe, coding bench, perf scripts |
 
 Other packages (`cache`, `config`, `logger`, `router`, `ui`, etc.) are scaffolding for future work.
 
@@ -169,11 +177,20 @@ pnpm --filter @uag/mcp build
 
 A project rule in `.cursor/rules/universal-ai-gateway-delegation.mdc` tells the agent when to delegate vs. when to handle work directly. Delegation is for self-contained drafts and reasoning — not for repo-aware bug fixes or small edits where free models are too weak.
 
+## Extra examples
+
+```sh
+pnpm exec tsx examples/model-probe.ts    # which catalog models still respond
+pnpm exec tsx examples/perf-smoke.ts     # latency smoke
+pnpm exec tsx examples/coding-bench.ts   # coding quality / speed bench
+```
+
 ## Notes
 
 - `tokens_saved` in MCP responses is an approximation based on downstream provider usage, not a direct comparison to the primary model's tokenizer.
 - At least one provider key is required; both are recommended for full fallback coverage.
 - Free models may take several minutes. Use `get_task_result` if `delegate_task` returns `timeout`.
+- Local artifacts stay out of git: `.env*`, `dist/`, `.data/` (web task history), and `.cursor/mcp.json`.
 
 ## License
 

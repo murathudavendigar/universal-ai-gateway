@@ -67,13 +67,12 @@ const response = await gateway.chat(
 
 Defined in [`packages/core/src/router.ts`](packages/core/src/router.ts):
 
-| Task            | Provider   | Model                                     |
-| --------------- | ---------- | ------------------------------------------ |
-| `documentation` | openrouter | `cohere/north-mini-code`                   |
-| `reasoning`     | nvidia     | `nvidia/llama-3.3-nemotron-super-49b-v1`   |
-| `coding`        | openrouter | `openai/gpt-oss-120b`                      |
-| `review`        | openrouter | `openai/gpt-oss-120b`                      |
-| `chat`          | openrouter | `openai/gpt-oss-120b`                      |
+| Task            | Chain (first → fallbacks) |
+| --------------- | ------------------------- |
+| `coding`        | OpenRouter `openai/gpt-oss-120b` → NVIDIA Ultra 550B → Super 120B |
+| `reasoning`     | NVIDIA Ultra 550B → Super 120B → OpenRouter GPT-OSS |
+| `documentation` | OpenRouter GPT-OSS → NVIDIA Super 120B |
+| `review` / `chat` | NVIDIA Super 120B → OpenRouter GPT-OSS → Ultra 550B |
 
 Update this switch statement whenever you want a task to route somewhere else — nothing else in the codebase needs to change.
 

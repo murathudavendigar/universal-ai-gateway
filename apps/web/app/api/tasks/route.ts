@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server";
 
-import { requireAuth } from "../../../lib/auth";
+import { guardApi } from "../../../lib/apiGuard";
 import { getGateway } from "../../../lib/gateway";
 
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
-  const unauthorized = requireAuth(request);
-  if (unauthorized) return unauthorized;
+  const blocked = guardApi(request);
+  if (blocked) return blocked;
 
   try {
     const { taskRegistry } = await getGateway();

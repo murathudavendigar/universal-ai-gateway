@@ -1,0 +1,14 @@
+{
+  "mcpServers": {
+    "universal-ai-gateway": {
+      "command": "node",
+      "args": [
+        "/absolute/path/to/universal-ai-gateway/apps/mcp/dist/index.js"
+      ],
+      "env": {
+        "OPENROUTER_API_KEY": "your-key",
+        "NVIDIA_API_KEY": "your-key"
+      }
+    }
+  }
+}
