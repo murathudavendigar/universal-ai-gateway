@@ -5,6 +5,8 @@ export const TRUNCATION_FINISH_REASONS = new Set(["length", "max_tokens"]);
 export interface ContinuationChatRequest {
   messages: ChatMessage[];
   model?: string;
+  temperature?: number;
+  maxTokens?: number;
 }
 
 export type ChatFn = (request: ContinuationChatRequest) => Promise<ChatResponse>;

@@ -249,3 +249,95 @@ describe("delegate_task / get_session_stats regression", () => {
     ]);
   });
 });
+
+describe("delegate_task generation params and message building", () => {
+  function captureChat() {
+    const calls: Array<{ request: any; options: any }> = [];
+    const chat = async (request: any, _task: any, options: any) => {
+      calls.push({ request, options });
+      return { provider: "p", model: "m", content: "ok", finishReason: "stop", usage: { totalTokens: 5 } };
+    };
+    return { calls, chat };
+  }
+
+  it("prepends system, forwards temperature/max_tokens, and passes a quality gate", async () => {
+    const { calls, chat } = captureChat();
+    const delegateTask = createDelegateTaskHandler(makeDeps({ chat }));
+
+    const out = JSON.parse(
+      await delegateTask({
+        prompt: "write it",
+        intent: "coding",
+        system: "Reply with code only.",
+        temperature: 0.2,
+        max_tokens: 512,
+      })
+    );
+
+    expect(out.status).toBe("success");
+    expect(calls[0]!.request.messages).toEqual([
+      { role: "system", content: "Reply with code only." },
+      { role: "user", content: "write it" },
+    ]);
+    expect(calls[0]!.request.temperature).toBe(0.2);
+    expect(calls[0]!.request.maxTokens).toBe(512);
+    expect(typeof calls[0]!.options.validateResponse).toBe("function");
+  });
+
+  it("accepts messages without a prompt and does not duplicate an existing system message", async () => {
+    const { calls, chat } = captureChat();
+    const delegateTask = createDelegateTaskHandler(makeDeps({ chat }));
+
+    const out = JSON.parse(
+      await delegateTask({
+        intent: "reasoning",
+        system: "ignored because messages already start with system",
+        messages: [
+          { role: "system", content: "S" },
+          { role: "user", content: "Q" },
+        ],
+      })
+    );
+
+    expect(out.status).toBe("success");
+    expect(calls[0]!.request.messages).toEqual([
+      { role: "system", content: "S" },
+      { role: "user", content: "Q" },
+    ]);
+  });
+
+  it("rejects missing content, system-only input, and out-of-range params before dispatch", async () => {
+    const { calls, chat } = captureChat();
+    const delegateTask = createDelegateTaskHandler(makeDeps({ chat }));
+
+    const cases = [
+      { intent: "coding" as const },
+      { intent: "coding" as const, system: "only system" },
+      { prompt: "x", intent: "coding" as const, temperature: 3 },
+      { prompt: "x", intent: "coding" as const, temperature: -1 },
+      { prompt: "x", intent: "coding" as const, max_tokens: 0 },
+      { prompt: "x", intent: "coding" as const, max_tokens: 1.5 },
+      { prompt: "x", intent: "coding" as const, max_tokens: 999_999 },
+    ];
+    for (const args of cases) {
+      expect(JSON.parse(await delegateTask(args)).status).toBe("error");
+    }
+    expect(calls).toHaveLength(0);
+  });
+
+  it("screens the system prompt for credential leaks", async () => {
+    const { calls, chat } = captureChat();
+    const delegateTask = createDelegateTaskHandler(makeDeps({ chat }));
+
+    const out = JSON.parse(
+      await delegateTask({
+        prompt: "hello",
+        intent: "coding",
+        system: "api_key = sk-abcdefghijklmnop1234567890",
+      })
+    );
+
+    expect(out.status).toBe("blocked");
+    expect(calls).toHaveLength(0);
+  });
+});

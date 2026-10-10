@@ -1,11 +1,12 @@
 import { randomUUID } from "node:crypto";
 
 import type { ChatMessage, ChatResponse } from "@uag/sdk/provider";
-import type { GatewayChatRequest, TaskType } from "@uag/core";
+import type { GatewayChatOptions, GatewayChatRequest, TaskType } from "@uag/core";
 
 import { chatWithContinuation } from "./continuation.js";
 import { screenPrompt } from "./moderation.js";
 import { validateModel } from "./modelValidation.js";
+import { rejectLowQualityResponse } from "./responseQuality.js";
 import type { SessionStats } from "./sessionStats.js";
 import type { TaskRegistry } from "./taskRegistry.js";
 import { withTimeoutAndProgress } from "./timeout.js";
@@ -15,13 +16,23 @@ import {
   TOKENS_SAVED_EXPLANATION,
 } from "./tokensSaved.js";
 
+export const MAX_TEMPERATURE = 2;
+export const MAX_OUTPUT_TOKENS = 32_768;
+
 export interface DelegateTaskArgs {
-  prompt: string;
+  /** Single-turn instruction. Optional when `messages` is provided. */
+  prompt?: string;
   intent: TaskType;
   specific_model?: string;
   request_id?: string;
   /** Optional multi-turn history. When set, replaces the single-prompt message list. */
   messages?: ChatMessage[];
+  /** Optional system prompt prepended to the conversation. */
+  system?: string;
+  /** Sampling temperature, 0..2. Omit for the provider default. */
+  temperature?: number;
+  /** Max output tokens per downstream call, 1..32768. Omit for the provider default. */
+  max_tokens?: number;
 }
 
 export interface DelegateTaskContext {
@@ -32,7 +43,11 @@ export interface DelegateTaskContext {
 }
 
 export interface DelegateTaskDeps {
-  chat: (request: GatewayChatRequest, task: TaskType) => Promise<ChatResponse>;
+  chat: (
+    request: GatewayChatRequest,
+    task: TaskType,
+    options?: GatewayChatOptions
+  ) => Promise<ChatResponse>;
   sessionStats: SessionStats;
   taskRegistry: TaskRegistry;
   knownModels: ReadonlySet<string>;
@@ -45,21 +60,47 @@ function errorMessage(error: unknown): string {
 }
 
 function buildMessages(args: DelegateTaskArgs): ChatMessage[] {
-  if (args.messages && args.messages.length > 0) {
-    return args.messages.map((message) => ({
-      role: message.role,
-      content: String(message.content ?? ""),
-    }));
+  const body: ChatMessage[] =
+    args.messages && args.messages.length > 0
+      ? args.messages.map((message) => ({
+          role: message.role,
+          content: String(message.content ?? ""),
+        }))
+      : args.prompt?.trim()
+        ? [{ role: "user", content: args.prompt }]
+        : [];
+
+  const system = args.system?.trim();
+  if (system && body[0]?.role !== "system") {
+    return [{ role: "system", content: system }, ...body];
   }
-  return [{ role: "user", content: args.prompt }];
+  return body;
 }
 
-function moderationText(args: DelegateTaskArgs, messages: ChatMessage[]): string {
-  const userBits = messages
-    .filter((message) => message.role === "user")
+function moderationText(messages: ChatMessage[]): string {
+  // System text is caller-supplied and is forwarded downstream too, so it is
+  // screened alongside user text (e.g. for pasted credentials).
+  return messages
+    .filter((message) => message.role === "user" || message.role === "system")
     .map((message) => message.content)
     .join("\n");
-  return userBits || args.prompt;
+}
+
+function validateGenerationParams(args: DelegateTaskArgs): string | null {
+  const { temperature, max_tokens: maxTokens } = args;
+  if (
+    temperature !== undefined &&
+    (!Number.isFinite(temperature) || temperature < 0 || temperature > MAX_TEMPERATURE)
+  ) {
+    return `temperature must be between 0 and ${MAX_TEMPERATURE}.`;
+  }
+  if (
+    maxTokens !== undefined &&
+    (!Number.isInteger(maxTokens) || maxTokens < 1 || maxTokens > MAX_OUTPUT_TOKENS)
+  ) {
+    return `max_tokens must be an integer between 1 and ${MAX_OUTPUT_TOKENS}.`;
+  }
+  return null;
 }
 
 export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
@@ -70,14 +111,19 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
     ctx?: DelegateTaskContext
   ): Promise<string> {
     const messages = buildMessages(args);
-    if (messages.length === 0 || !messages.some((m) => m.content.trim())) {
+    if (!messages.some((m) => m.role !== "system" && m.content.trim())) {
       return JSON.stringify({
         status: "error",
         message: "prompt or messages with content are required.",
       });
     }
 
-    const moderation = screenPrompt(moderationText(args, messages));
+    const paramError = validateGenerationParams(args);
+    if (paramError) {
+      return JSON.stringify({ status: "error", message: paramError });
+    }
+
+    const moderation = screenPrompt(moderationText(messages));
     if (!moderation.allowed) {
       return JSON.stringify({
         status: "blocked",
@@ -123,8 +169,23 @@ export function createDelegateTaskHandler(deps: DelegateTaskDeps) {
     });
 
     const dispatched = chatWithContinuation(
-      (req) => deps.chat({ messages: req.messages, model: req.model }, args.intent),
-      { messages, model: args.specific_model }
+      (req) =>
+        deps.chat(
+          {
+            messages: req.messages,
+            model: req.model,
+            temperature: req.temperature,
+            maxTokens: req.maxTokens,
+          },
+          args.intent,
+          { validateResponse: rejectLowQualityResponse }
+        ),
+      {
+        messages,
+        model: args.specific_model,
+        temperature: args.temperature,
+        maxTokens: args.max_tokens,
+      }
     )
       .then((continuationResult) => {
         const tokensSaved = computeTokensSaved(continuationResult.response.usage);

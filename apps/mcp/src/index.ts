@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 import { config } from "dotenv";
 import { FastMCP } from "fastmcp";
-import { dirname, resolve } from "node:path";
+import { createRequire } from "node:module";
+import { homedir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { env } from "node:process";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -10,19 +12,20 @@ import { AIGateway, ProviderRegistry, Router } from "@uag/core";
 import {
   buildKnownModelSet,
   createDelegateTaskHandler,
+  createFileTaskPersistence,
   createGetSessionStatsHandler,
   createGetTaskResultHandler,
   createHealthHandler,
+  createHealthMonitor,
   createListRoutingHandler,
   DELEGATE_TASK_TOOL_DESCRIPTION,
+  MAX_OUTPUT_TOKENS,
+  MAX_TEMPERATURE,
   SessionStats,
   TaskRegistry,
 } from "@uag/operator";
 import { createNvidiaProvider } from "@uag/provider-nvidia";
 import { createOpenRouterProvider } from "@uag/provider-openrouter";
-
-process.env.DOTENV_QUIET = "true";
-process.env.DOTENVX_QUIET = "true";
 
 process.env.DOTENV_QUIET = "true";
 process.env.DOTENVX_QUIET = "true";
@@ -69,11 +72,30 @@ const gateway = new AIGateway(registry, router);
 
 const sessionStats = new SessionStats();
 const taskRegistry = new TaskRegistry();
+
+// Persist task history so get_task_result and request_id replay survive restarts.
+// Disable with UAG_PERSIST_TASKS=0; relocate with UAG_DATA_DIR (default ~/.uag).
+const taskPersistence =
+  env.UAG_PERSIST_TASKS === "0"
+    ? undefined
+    : createFileTaskPersistence({
+        filePath: join(env.UAG_DATA_DIR ?? join(homedir(), ".uag"), "tasks.json"),
+        // stdout carries the MCP protocol; diagnostics must go to stderr.
+        onError: (message, error) => console.error(`[UAG] ${message}:`, error),
+      });
+await taskPersistence?.attach(taskRegistry);
+
+const healthMonitor = createHealthMonitor({ providers: registry.list() });
+void healthMonitor.refresh();
 const knownModels = await buildKnownModelSet(registry.list(), router);
 const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 300_000);
 
 const delegateTask = createDelegateTaskHandler({
-  chat: (request, task) => gateway.chat(request, task),
+  chat: (request, task, options) =>
+    gateway.chat(request, task, {
+      ...options,
+      skipProviderIds: healthMonitor.unhealthyProviders(),
+    }),
   sessionStats,
   taskRegistry,
   knownModels,
@@ -82,11 +104,18 @@ const delegateTask = createDelegateTaskHandler({
 const getSessionStats = createGetSessionStatsHandler({ sessionStats });
 const getTaskResult = createGetTaskResultHandler({ taskRegistry });
 const health = createHealthHandler({ providers: registry.list() });
-const listRouting = createListRoutingHandler({ router, knownModels });
+const listRouting = createListRoutingHandler({
+  router,
+  knownModels,
+  unhealthyProviders: () => healthMonitor.unhealthyProviders(),
+});
+
+const pkgRequire = createRequire(import.meta.url);
+const { version } = pkgRequire("../package.json") as { version: `${number}.${number}.${number}` };
 
 const server = new FastMCP({
   name: "Universal AI Gateway",
-  version: "0.1.0",
+  version,
 });
 
 server.addTool({
@@ -134,10 +163,42 @@ server.addTool({
   parameters: z.object({
     prompt: z
       .string()
+      .optional()
       .describe(
         "Self-contained instruction for the submodel. Include all context inline — " +
-          "the downstream model cannot read the repo.",
+          "the downstream model cannot read the repo. Required unless `messages` is provided.",
       ),
+    system: z
+      .string()
+      .optional()
+      .describe(
+        "Optional system prompt (role, output format, constraints) prepended to the conversation.",
+      ),
+    messages: z
+      .array(
+        z.object({
+          role: z.enum(["system", "user", "assistant"]),
+          content: z.string(),
+        }),
+      )
+      .optional()
+      .describe(
+        "Optional multi-turn history. When provided, it replaces `prompt`. " +
+          "Use for few-shot examples or follow-ups on a prior delegation.",
+      ),
+    temperature: z
+      .number()
+      .min(0)
+      .max(MAX_TEMPERATURE)
+      .optional()
+      .describe("Sampling temperature. Lower (0-0.3) for code, higher for brainstorming. Omit for the provider default."),
+    max_tokens: z
+      .number()
+      .int()
+      .min(1)
+      .max(MAX_OUTPUT_TOKENS)
+      .optional()
+      .describe("Cap on output tokens per downstream call. Omit for the provider default."),
     intent: z
       .enum(["coding", "reasoning"])
       .describe(
@@ -166,6 +227,17 @@ server.addTool({
       log: ctx.log,
     }),
 });
+
+let shuttingDown = false;
+const shutdown = async () => {
+  if (shuttingDown) return;
+  shuttingDown = true;
+  await taskPersistence?.flush();
+  process.exit(0);
+};
+process.once("SIGINT", () => void shutdown());
+process.once("SIGTERM", () => void shutdown());
+process.stdin.once("close", () => void shutdown());
 
 await server.start({
   transportType: "stdio",

@@ -11,6 +11,12 @@ export type GatewayChatRequest = Omit<ChatRequest, "model"> & {
 export interface GatewayChatOptions {
   /** Prefer skipping these providers when healthier alternatives remain. */
   skipProviderIds?: ReadonlySet<string>;
+  /**
+   * Optional quality gate for non-streaming chat. Return a rejection reason to
+   * treat the response as a failure and fall through to the next plan; return
+   * `null`/`undefined` to accept it.
+   */
+  validateResponse?: (response: ChatResponse) => string | null | undefined;
 }
 
 function errorMessage(error: unknown): string {
@@ -35,12 +41,23 @@ export class AIGateway {
     private readonly router: Router
   ) {}
 
+  /**
+   * Router plans restricted to registered providers. A chain that references a
+   * provider without an API key must not abort the fallback loop.
+   */
+  private plansFor(task: TaskType, options?: GatewayChatOptions) {
+    const registered = this.router
+      .route({ task })
+      .filter((plan) => this.registry.has(plan.providerId));
+    return orderPlans(registered, options?.skipProviderIds);
+  }
+
   async chat(
     request: GatewayChatRequest,
     task: TaskType = "chat",
     options?: GatewayChatOptions
   ): Promise<ChatResponse> {
-    const plans = orderPlans(this.router.route({ task }), options?.skipProviderIds);
+    const plans = this.plansFor(task, options);
 
     let lastError: unknown;
 
@@ -48,14 +65,22 @@ export class AIGateway {
       const provider = this.registry.get(plan.providerId);
 
       try {
-        return await provider.chat({
+        const response = await provider.chat({
           ...request,
           model: request.model ?? plan.model,
         });
+
+        const rejection = options?.validateResponse?.(response);
+        if (rejection) {
+          throw new Error(`Response rejected: ${rejection}`);
+        }
+
+        return response;
       } catch (error) {
         lastError = error;
         console.warn(
-          `[Gateway Fallback] Model ${plan.model} (${plan.providerId}) failed, trying next...`
+          `[Gateway Fallback] Model ${plan.model} (${plan.providerId}) failed ` +
+            `(${errorMessage(error)}), trying next...`
         );
       }
     }
@@ -70,7 +95,7 @@ export class AIGateway {
     task: TaskType = "chat",
     options?: GatewayChatOptions
   ): AsyncGenerator<ChatChunk, void, unknown> {
-    const plans = orderPlans(this.router.route({ task }), options?.skipProviderIds);
+    const plans = this.plansFor(task, options);
 
     let lastError: unknown;
 

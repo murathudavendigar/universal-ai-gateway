@@ -35,11 +35,16 @@ export interface TaskRegistryOptions {
 export class TaskRegistry {
   private readonly tasks = new Map<string, TaskRecord>();
   private readonly maxSize: number;
-  private readonly onChange?: () => void;
+  private onChange?: () => void;
 
   constructor(options: TaskRegistryOptions = {}) {
     this.maxSize = options.maxSize ?? 200;
     this.onChange = options.onChange;
+  }
+
+  /** Replaces the change listener (used by persistence after construction). */
+  setOnChange(listener: (() => void) | undefined): void {
+    this.onChange = listener;
   }
 
   create(requestId: string, metadata?: TaskMetadata): TaskRecord {

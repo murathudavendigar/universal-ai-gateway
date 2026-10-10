@@ -65,6 +65,7 @@ export const DELEGATE_TASK_TOOL_DESCRIPTION =
   "Default: omit specific_model (auto-route). coding chain ≈ GPT-OSS 120B → Nemotron Ultra 550B → Super 120B; " +
   "reasoning chain ≈ Nemotron Ultra 550B → Super 120B → GPT-OSS 120B. " +
   "Call list_routing first if unsure which models exist or which chain applies. " +
+  "Optional: system (role/format constraints), messages (multi-turn/few-shot, replaces prompt), temperature, max_tokens. " +
   "On timeout poll get_task_result with request_id.";
 
 export interface RoutingSource {

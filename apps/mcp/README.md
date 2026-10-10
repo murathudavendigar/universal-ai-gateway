@@ -32,6 +32,8 @@ At least one provider API key is required:
 | `OPENROUTER_API_KEY` | One of two | OpenRouter provider key |
 | `NVIDIA_API_KEY` | One of two | NVIDIA provider key |
 | `UAG_DELEGATE_TIMEOUT_MS` | No | Delegate timeout in ms (default: `300000` / 5 min) |
+| `UAG_DATA_DIR` | No | Where task history is stored as `tasks.json` (default: `~/.uag`) |
+| `UAG_PERSIST_TASKS` | No | Set to `0` to keep task history in memory only |
 
 If keys are not already in the environment, the server falls back to `./.env` in the current working directory.
 
@@ -82,6 +84,20 @@ Delegate a coding task:
 }
 ```
 
+Delegate with a system prompt and generation limits:
+
+```json
+{
+  "prompt": "Write a debounce utility.",
+  "system": "Reply with a single TypeScript code block, no prose.",
+  "intent": "coding",
+  "temperature": 0.2,
+  "max_tokens": 1024
+}
+```
+
+`prompt` is optional when `messages` (an array of `{role, content}`) is supplied, e.g. for few-shot examples or follow-ups.
+
 Delegate with an explicit model:
 
 ```json
@@ -114,5 +130,8 @@ UAG_RUN_LIVE_TESTS=1 pnpm vitest run apps/mcp/src/live.integration.test.ts
 
 - `tokens_saved` is an approximation based on downstream provider usage, not a direct measurement against the primary assistant model.
 - `delegate_task` supports `request_id` idempotency and background completion after timeout.
+- Task history persists to `tasks.json` (mode `0600`), so `get_task_result` and `request_id` replay survive restarts. Tasks still in flight when the server stopped are reported as `error` (interrupted).
+- Empty or content-filtered downstream responses are treated as failures and fall through to the next model in the chain.
+- Providers that fail a periodic health check are deferred to the end of the fallback chain (see `unhealthy_providers` in `list_routing`).
 - Free downstream models may take 3-4 minutes. While waiting, the server emits MCP progress/log updates every 15 seconds.
 - Input moderation blocks obvious prompt-injection and credential-leak patterns before dispatch.

@@ -131,12 +131,13 @@ async function createRuntime(): Promise<GatewayRuntime> {
   const timeoutMs = Number(env.UAG_DELEGATE_TIMEOUT_MS ?? 300_000);
 
   const delegateTask = createDelegateTaskHandler({
-    chat: async (request, task) => {
+    chat: async (request, task, options) => {
       const checkedAt = globalForGateway.__uagHealthCheckedAt ?? 0;
       if (Date.now() - checkedAt > 60_000) {
         void refreshHealthCache();
       }
       return gateway.chat(request, task, {
+        ...options,
         skipProviderIds: unhealthyProviders(),
       });
     },
